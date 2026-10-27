@@ -1,0 +1,1120 @@
+<!DOCTYPE html>
+<html lang="fr" class="h-full bg-slate-950 text-slate-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Card Print Studio</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#eef2ff',
+                            100: '#e0e7ff',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                            900: '#312e81',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- jsPDF & html2canvas for PDF Export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    
+    <style>
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
+        ::-webkit-scrollbar-thumb { background: rgba(99, 102, 241, 0.4); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(99, 102, 241, 0.7); }
+
+        /* Print Specific CSS */
+        @media print {
+            @page {
+                size: var(--page-size-css, A4 portrait);
+                margin: 0 !important;
+            }
+            html, body {
+                background: white !important;
+                color: black !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 100% !important;
+                height: auto !important;
+                overflow: visible !important;
+            }
+            .no-print {
+                display: none !important;
+            }
+            #printOnlyContainer {
+                display: block !important;
+                position: absolute !important;
+                top: 0 !important;
+                left: 0 !important;
+                width: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                z-index: 99999 !important;
+            }
+            .print-page {
+                page-break-after: always !important;
+                break-after: page !important;
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+                margin: 0 auto !important;
+                box-shadow: none !important;
+                background: white !important;
+                position: relative !important;
+            }
+        }
+
+        #printOnlyContainer {
+            display: none;
+        }
+
+        /* Off-screen canvas rendering staging area for html2canvas */
+        #pdfStagingArea {
+            position: absolute;
+            left: -9999px;
+            top: 0;
+            z-index: -1000;
+            pointer-events: none;
+            opacity: 1;
+            background: #ffffff;
+        }
+
+        /* Page sheet design */
+        .page-sheet {
+            background-color: white;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
+            transition: transform 0.2s ease-in-out;
+            position: relative;
+            color: #000;
+        }
+
+        /* Crop Marks */
+        .crop-mark {
+            position: absolute;
+            pointer-events: none;
+            z-index: 10;
+        }
+        .crop-mark-tl { top: -6mm; left: -6mm; width: 6mm; height: 6mm; border-right: 0.5pt solid #000; border-bottom: 0.5pt solid #000; }
+        .crop-mark-tr { top: -6mm; right: -6mm; width: 6mm; height: 6mm; border-left: 0.5pt solid #000; border-bottom: 0.5pt solid #000; }
+        .crop-mark-bl { bottom: -6mm; left: -6mm; width: 6mm; height: 6mm; border-right: 0.5pt solid #000; border-top: 0.5pt solid #000; }
+        .crop-mark-br { bottom: -6mm; right: -6mm; width: 6mm; height: 6mm; border-left: 0.5pt solid #000; border-top: 0.5pt solid #000; }
+    </style>
+</head>
+<body class="h-full flex flex-col font-sans overflow-hidden bg-slate-950 text-slate-100">
+
+    <!-- HEADER / NAVBAR -->
+    <header class="no-print bg-slate-900 border-b border-slate-800 px-6 py-3 flex items-center justify-between shrink-0 shadow-md">
+        <div class="flex items-center space-x-3">
+            <div class="bg-gradient-to-tr from-brand-600 to-indigo-400 p-2 rounded-xl text-white shadow-lg shadow-indigo-500/20 flex items-center justify-center">
+                <i data-lucide="layers" class="w-6 h-6"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-lg leading-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">Card Print Studio</h1>
+                <p class="text-xs text-slate-400">Générateur & Impression de Cartes de Jeu</p>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-3">
+            <button id="resetDeckBtn" class="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-red-400 hover:bg-slate-800 transition flex items-center gap-1.5">
+                <i data-lucide="trash-2" class="w-4 h-4"></i> Réinitialiser
+            </button>
+            <div class="h-4 w-px bg-slate-800"></div>
+            <button id="downloadPdfBtn" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-white rounded-xl text-sm font-semibold transition flex items-center gap-2 border border-slate-700 shadow-sm">
+                <i data-lucide="file-down" class="w-4 h-4"></i> Exporter PDF
+            </button>
+            <button id="printBtn" class="px-5 py-2 bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white rounded-xl text-sm font-semibold transition flex items-center gap-2 shadow-lg shadow-indigo-600/30">
+                <i data-lucide="printer" class="w-4 h-4"></i> Imprimer
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN WORKSPACE -->
+    <div class="no-print flex-1 flex overflow-hidden">
+
+        <!-- LEFT CONTROL PANEL -->
+        <aside class="w-96 bg-slate-900/90 border-r border-slate-800/80 flex flex-col shrink-0 overflow-hidden">
+            
+            <!-- Navigation Tabs -->
+            <div class="flex border-b border-slate-800 bg-slate-950/50 p-1 gap-1">
+                <button id="tabDeckBtn" onclick="switchTab('deck')" class="flex-1 py-2 text-xs font-semibold rounded-lg text-indigo-400 bg-slate-800/80 transition flex items-center justify-center gap-1.5 shadow-sm">
+                    <i data-lucide="library" class="w-4 h-4"></i> Cartes (<span id="totalCardsCount">0</span>)
+                </button>
+                <button id="tabSettingsBtn" onclick="switchTab('settings')" class="flex-1 py-2 text-xs font-semibold rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 transition flex items-center justify-center gap-1.5">
+                    <i data-lucide="sliders" class="w-4 h-4"></i> Configuration
+                </button>
+            </div>
+
+            <!-- TAB 1: DECK MANAGEMENT -->
+            <div id="tabDeck" class="flex-1 overflow-y-auto p-4 space-y-5">
+                
+                <!-- Global Card Back Section -->
+                <div class="bg-slate-800/40 border border-slate-800 rounded-xl p-3 space-y-3">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                            <i data-lucide="square" class="w-4 h-4 text-brand-500"></i> Dos Général (Verso)
+                        </span>
+                        <button id="removeBackBtn" class="hidden text-xs text-red-400 hover:underline">Supprimer</button>
+                    </div>
+                    
+                    <div id="backDropzone" class="border-2 border-dashed border-slate-700 hover:border-brand-500 rounded-xl p-3 text-center cursor-pointer transition bg-slate-900/40 relative overflow-hidden group">
+                        <input type="file" id="backInput" accept="image/*" class="hidden">
+                        <div id="backPlaceholder" class="space-y-1 py-2">
+                            <i data-lucide="upload-cloud" class="w-6 h-6 mx-auto text-slate-400 group-hover:text-brand-400 transition"></i>
+                            <p class="text-xs font-medium text-slate-300">Ajouter le dos par défaut</p>
+                            <p class="text-[10px] text-slate-500">Appliqué automatiquement à tous les versos</p>
+                        </div>
+                        <img id="backPreviewImg" class="hidden h-24 mx-auto object-contain rounded border border-slate-700 shadow-md">
+                    </div>
+                </div>
+
+                <!-- Card Fronts Upload & List -->
+                <div class="space-y-3">
+                    <div class="flex justify-between items-center">
+                        <span class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                            <i data-lucide="images" class="w-4 h-4 text-brand-500"></i> Cartes du Paquet
+                        </span>
+                        <span class="text-xs text-slate-400" id="deckSummaryText">0 visuel(s)</span>
+                    </div>
+
+                    <!-- Multiple Image Upload Zone -->
+                    <div id="frontsDropzone" class="border-2 border-dashed border-brand-500/40 hover:border-brand-500 bg-brand-950/10 hover:bg-brand-950/20 rounded-xl p-4 text-center cursor-pointer transition group">
+                        <input type="file" id="frontsInput" accept="image/*" multiple class="hidden">
+                        <div class="space-y-1.5">
+                            <div class="w-10 h-10 rounded-full bg-brand-500/10 text-brand-400 flex items-center justify-center mx-auto group-hover:scale-110 transition">
+                                <i data-lucide="plus" class="w-5 h-5"></i>
+                            </div>
+                            <p class="text-xs font-semibold text-slate-200">Importer des cartes (Recto)</p>
+                            <p class="text-[10px] text-slate-400">Sélection multiple (PNG, JPG, WebP)</p>
+                        </div>
+                    </div>
+
+                    <!-- Hidden input for custom card back uploads -->
+                    <input type="file" id="customBackInput" accept="image/*" class="hidden">
+
+                    <!-- Card Items List -->
+                    <div id="cardsList" class="space-y-3">
+                        <!-- Empty State -->
+                        <div id="emptyDeckState" class="text-center py-8 px-4 text-slate-500 border border-slate-800/60 rounded-xl bg-slate-900/30">
+                            <i data-lucide="image-off" class="w-8 h-8 mx-auto mb-2 opacity-40"></i>
+                            <p class="text-xs font-medium">Aucune carte dans votre paquet.</p>
+                            <p class="text-[11px] opacity-70">Glissez vos visuels ci-dessus pour commencer.</p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- TAB 2: PRINT & LAYOUT SETTINGS -->
+            <div id="tabSettings" class="flex-1 overflow-y-auto p-4 space-y-5 hidden">
+                
+                <!-- Format & Scale -->
+                <div class="space-y-3">
+                    <label class="text-xs font-bold uppercase tracking-wider text-slate-300 block">Preset Taille Carte</label>
+                    <select id="presetCardSize" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-xl p-2.5 text-xs font-medium focus:ring-2 focus:ring-brand-500 outline-none">
+                        <option value="poker">Poker Standard (63.5 x 88.9 mm)</option>
+                        <option value="bridge">Bridge (57.0 x 88.9 mm)</option>
+                        <option value="mini">Mini / Euro (44.0 x 63.0 mm)</option>
+                        <option value="tarot">Tarot / Large (70.0 x 120.0 mm)</option>
+                        <option value="domino">Domino / Euro Small (44.0 x 67.0 mm)</option>
+                        <option value="custom">Dimension Personnalisée...</option>
+                    </select>
+
+                    <div id="customCardDimensions" class="grid grid-cols-2 gap-2 hidden">
+                        <div>
+                            <span class="text-[10px] text-slate-400 block mb-1">Largeur (mm)</span>
+                            <input type="number" id="cardWidthInput" value="63.5" step="0.1" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg p-2 text-xs">
+                        </div>
+                        <div>
+                            <span class="text-[10px] text-slate-400 block mb-1">Hauteur (mm)</span>
+                            <input type="number" id="cardHeightInput" value="88.9" step="0.1" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg p-2 text-xs">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Page Format & Orientation -->
+                <div class="space-y-3">
+                    <label class="text-xs font-bold uppercase tracking-wider text-slate-300 block">Format de Papier</label>
+                    <div class="grid grid-cols-3 gap-2">
+                        <button type="button" data-pageSize="A4" class="page-size-btn p-2 border border-brand-500 bg-brand-500/10 text-brand-300 rounded-xl text-xs font-semibold text-center">A4</button>
+                        <button type="button" data-pageSize="Letter" class="page-size-btn p-2 border border-slate-700 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold text-center hover:border-slate-600">Letter</button>
+                        <button type="button" data-pageSize="A3" class="page-size-btn p-2 border border-slate-700 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold text-center hover:border-slate-600">A3</button>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 pt-1">
+                        <button type="button" data-orientation="portrait" class="orientation-btn p-2 border border-brand-500 bg-brand-500/10 text-brand-300 rounded-xl text-xs font-semibold text-center flex items-center justify-center gap-1">
+                            <i data-lucide="file-text" class="w-3.5 h-3.5"></i> Portrait
+                        </button>
+                        <button type="button" data-orientation="landscape" class="orientation-btn p-2 border border-slate-700 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold text-center hover:border-slate-600 flex items-center justify-center gap-1">
+                            <i data-lucide="file-text" class="w-3.5 h-3.5 rotate-90"></i> Paysage
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Print Mode (Duplex/Front Only) -->
+                <div class="space-y-3 pt-2 border-t border-slate-800">
+                    <label class="text-xs font-bold uppercase tracking-wider text-slate-300 block">Impression Verso (Recto/Verso)</label>
+                    <label class="flex items-center justify-between p-2.5 bg-slate-800/80 rounded-xl cursor-pointer">
+                        <span class="text-xs font-medium text-slate-200">Générer les pages de versos</span>
+                        <input type="checkbox" id="enableDuplex" checked class="w-4 h-4 rounded text-brand-600 focus:ring-brand-500 bg-slate-900 border-slate-700">
+                    </label>
+
+                    <div id="duplexOptions" class="space-y-2 pl-1">
+                        <span class="text-[10px] text-slate-400 block">Retournement imprimante:</span>
+                        <div class="grid grid-cols-2 gap-2">
+                            <label class="border border-slate-700 bg-slate-800 p-2 rounded-lg flex items-center gap-2 cursor-pointer hover:bg-slate-700/50">
+                                <input type="radio" name="duplexFlip" value="longEdge" checked class="text-brand-600 focus:ring-brand-500">
+                                <span class="text-[11px] text-slate-200">Bord Long</span>
+                            </label>
+                            <label class="border border-slate-700 bg-slate-800 p-2 rounded-lg flex items-center gap-2 cursor-pointer hover:bg-slate-700/50">
+                                <input type="radio" name="duplexFlip" value="shortEdge" class="text-brand-600 focus:ring-brand-500">
+                                <span class="text-[11px] text-slate-200">Bord Court</span>
+                            </label>
+                        </div>
+                        <p class="text-[10px] text-slate-400 leading-tight">Miroir horizontal automatique pour aligner chaque dos exactement avec sa face recto.</p>
+                    </div>
+                </div>
+
+                <!-- Margins & Grid Gaps -->
+                <div class="space-y-3 pt-2 border-t border-slate-800">
+                    <label class="text-xs font-bold uppercase tracking-wider text-slate-300 block">Marges & Espacements (mm)</label>
+                    
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <span class="text-[10px] text-slate-400 block mb-1">Marge Horiz. Page</span>
+                            <input type="number" id="pageMarginX" value="10" min="0" max="50" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg p-2 text-xs">
+                        </div>
+                        <div>
+                            <span class="text-[10px] text-slate-400 block mb-1">Marge Vert. Page</span>
+                            <input type="number" id="pageMarginY" value="10" min="0" max="50" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg p-2 text-xs">
+                        </div>
+                        <div>
+                            <span class="text-[10px] text-slate-400 block mb-1">Ecartement Horiz.</span>
+                            <input type="number" id="gapX" value="0" min="0" max="20" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg p-2 text-xs">
+                        </div>
+                        <div>
+                            <span class="text-[10px] text-slate-400 block mb-1">Ecartement Vert.</span>
+                            <input type="number" id="gapY" value="0" min="0" max="20" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg p-2 text-xs">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Guides & Cut Marks -->
+                <div class="space-y-3 pt-2 border-t border-slate-800">
+                    <label class="text-xs font-bold uppercase tracking-wider text-slate-300 block">Marques de Coupe & Guides</label>
+                    
+                    <label class="flex items-center justify-between p-2 bg-slate-800/60 rounded-lg cursor-pointer">
+                        <span class="text-xs text-slate-200">Traits de Coupe (Crop Marks)</span>
+                        <input type="checkbox" id="showCropMarks" checked class="w-4 h-4 rounded text-brand-600 focus:ring-brand-500 bg-slate-900 border-slate-700">
+                    </label>
+
+                    <label class="flex items-center justify-between p-2 bg-slate-800/60 rounded-lg cursor-pointer">
+                        <span class="text-xs text-slate-200">Coins Arrondis (Guide visuel)</span>
+                        <input type="checkbox" id="showCornerRadius" checked class="w-4 h-4 rounded text-brand-600 focus:ring-brand-500 bg-slate-900 border-slate-700">
+                    </label>
+
+                    <label class="flex items-center justify-between p-2 bg-slate-800/60 rounded-lg cursor-pointer">
+                        <span class="text-xs text-slate-200">Bordure Fine d'alignement</span>
+                        <input type="checkbox" id="showCardBorder" class="w-4 h-4 rounded text-brand-600 focus:ring-brand-500 bg-slate-900 border-slate-700">
+                    </label>
+                </div>
+
+            </div>
+        </aside>
+
+        <!-- RIGHT PREVIEW CANVAS WORKSPACE -->
+        <main class="flex-1 bg-slate-950 flex flex-col min-w-0 overflow-hidden relative">
+            
+            <!-- Controls Bar Above Preview -->
+            <div class="no-print bg-slate-900/60 border-b border-slate-800 px-6 py-2.5 flex items-center justify-between text-xs text-slate-400 shrink-0">
+                <div class="flex items-center gap-4">
+                    <span class="flex items-center gap-1.5"><i data-lucide="files" class="w-4 h-4 text-brand-400"></i> Total Pages: <strong id="totalPagesCount" class="text-slate-200">0</strong></span>
+                    <span class="flex items-center gap-1.5"><i data-lucide="copy" class="w-4 h-4 text-brand-400"></i> Cartes Total: <strong id="totalCardsDetails" class="text-slate-200">0 Recto / 0 Verso</strong></span>
+                    <span class="flex items-center gap-1.5"><i data-lucide="grid" class="w-4 h-4 text-brand-400"></i> Disposition: <strong id="gridFormatText" class="text-slate-200">3x3 par page</strong></span>
+                </div>
+
+                <!-- Zoom Controls -->
+                <div class="flex items-center space-x-2 bg-slate-800/80 rounded-lg p-1 border border-slate-700/60">
+                    <button id="zoomOutBtn" class="p-1 hover:text-white rounded hover:bg-slate-700"><i data-lucide="minus" class="w-3.5 h-3.5"></i></button>
+                    <span id="zoomLabel" class="w-12 text-center text-[11px] font-semibold text-slate-200">75%</span>
+                    <button id="zoomInBtn" class="p-1 hover:text-white rounded hover:bg-slate-700"><i data-lucide="plus" class="w-3.5 h-3.5"></i></button>
+                    <button id="zoomFitBtn" class="p-1 hover:text-white rounded hover:bg-slate-700 text-[11px] px-2 font-medium">Ajuster</button>
+                </div>
+            </div>
+
+            <!-- Scrollable Page Container -->
+            <div class="flex-1 overflow-auto p-8 flex flex-col items-center gap-8 justify-start" id="previewViewport">
+                <div id="pagesRenderArea" class="flex flex-col items-center gap-10 transition-transform origin-top">
+                    <!-- Sheet Pages dynamically rendered here -->
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- HIDDEN PRINT-ONLY CONTAINER -->
+    <div id="printOnlyContainer" class="print-only-container">
+        <!-- Rendered sheet pages strictly for window.print() -->
+    </div>
+
+    <!-- OFF-SCREEN STAGING CONTAINER FOR PDF CAPTURE -->
+    <div id="pdfStagingArea"></div>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toast" class="fixed bottom-5 right-5 bg-slate-800 text-slate-100 border border-slate-700 shadow-2xl rounded-xl px-4 py-3 text-sm flex items-center gap-3 transition-all transform translate-y-20 opacity-0 z-50">
+        <i id="toastIcon" data-lucide="info" class="w-5 h-5 text-brand-400"></i>
+        <span id="toastMsg">Message</span>
+    </div>
+
+    <!-- LOGIC / JAVASCRIPT -->
+    <script>
+        // State Management
+        const state = {
+            cards: [], // { id, src, backSrc, name, qty }
+            globalBackSrc: null,
+            settings: {
+                pageSize: 'A4', // A4, Letter, A3
+                orientation: 'portrait', // portrait or landscape
+                cardWidth: 63.5, // mm
+                cardHeight: 88.9, // mm
+                marginX: 10, // mm
+                marginY: 10, // mm
+                gapX: 0, // mm
+                gapY: 0, // mm
+                enableDuplex: true,
+                duplexFlip: 'longEdge', // 'longEdge' or 'shortEdge'
+                showCropMarks: true,
+                showCornerRadius: true,
+                showCardBorder: false
+            },
+            zoom: 0.75,
+            activeCustomBackIndex: null
+        };
+
+        // Page Specs in MM
+        const PAGE_SPECS = {
+            'A4': { width: 210, height: 297 },
+            'Letter': { width: 215.9, height: 279.4 },
+            'A3': { width: 297, height: 420 }
+        };
+
+        // DOM Elements
+        const frontsInput = document.getElementById('frontsInput');
+        const frontsDropzone = document.getElementById('frontsDropzone');
+        const backInput = document.getElementById('backInput');
+        const backDropzone = document.getElementById('backDropzone');
+        const backPreviewImg = document.getElementById('backPreviewImg');
+        const backPlaceholder = document.getElementById('backPlaceholder');
+        const removeBackBtn = document.getElementById('removeBackBtn');
+        const customBackInput = document.getElementById('customBackInput');
+        const cardsList = document.getElementById('cardsList');
+        const emptyDeckState = document.getElementById('emptyDeckState');
+        const pagesRenderArea = document.getElementById('pagesRenderArea');
+        const printOnlyContainer = document.getElementById('printOnlyContainer');
+
+        // Initializer
+        window.addEventListener('DOMContentLoaded', () => {
+            lucide.createIcons();
+            initEventListeners();
+            updateGridCalculations();
+            renderPreview();
+        });
+
+        function initEventListeners() {
+            // Fronts Drag and Drop & Click
+            frontsDropzone.addEventListener('click', () => frontsInput.click());
+            frontsInput.addEventListener('change', (e) => handleImageUpload(e.target.files));
+            setupDropZone(frontsDropzone, (files) => handleImageUpload(files));
+
+            // Global Back Drag and Drop & Click
+            backDropzone.addEventListener('click', () => backInput.click());
+            backInput.addEventListener('change', (e) => handleGlobalBackUpload(e.target.files[0]));
+            setupDropZone(backDropzone, (files) => handleGlobalBackUpload(files[0]));
+
+            // Custom Card Back Input
+            customBackInput.addEventListener('change', (e) => {
+                if (state.activeCustomBackIndex !== null && e.target.files && e.target.files[0]) {
+                    const reader = new FileReader();
+                    const idx = state.activeCustomBackIndex;
+                    reader.onload = (event) => {
+                        state.cards[idx].backSrc = event.target.result;
+                        renderCardsList();
+                        renderPreview();
+                        showToast(`Dos spécifique ajouté à "${state.cards[idx].name}"`);
+                    };
+                    reader.readAsDataURL(e.target.files[0]);
+                }
+            });
+
+            removeBackBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                state.globalBackSrc = null;
+                backPreviewImg.src = '';
+                backPreviewImg.classList.add('hidden');
+                backPlaceholder.classList.remove('hidden');
+                removeBackBtn.classList.add('hidden');
+                renderCardsList();
+                renderPreview();
+                showToast('Dos général supprimé');
+            });
+
+            // Preset Card Sizes
+            document.getElementById('presetCardSize').addEventListener('change', (e) => {
+                const val = e.target.value;
+                const customDiv = document.getElementById('customCardDimensions');
+                if (val === 'poker') {
+                    state.settings.cardWidth = 63.5; state.settings.cardHeight = 88.9;
+                    customDiv.classList.add('hidden');
+                } else if (val === 'bridge') {
+                    state.settings.cardWidth = 57.0; state.settings.cardHeight = 88.9;
+                    customDiv.classList.add('hidden');
+                } else if (val === 'mini') {
+                    state.settings.cardWidth = 44.0; state.settings.cardHeight = 63.0;
+                    customDiv.classList.add('hidden');
+                } else if (val === 'tarot') {
+                    state.settings.cardWidth = 70.0; state.settings.cardHeight = 120.0;
+                    customDiv.classList.add('hidden');
+                } else if (val === 'domino') {
+                    state.settings.cardWidth = 44.0; state.settings.cardHeight = 67.0;
+                    customDiv.classList.add('hidden');
+                } else if (val === 'custom') {
+                    customDiv.classList.remove('hidden');
+                }
+                document.getElementById('cardWidthInput').value = state.settings.cardWidth;
+                document.getElementById('cardHeightInput').value = state.settings.cardHeight;
+                renderPreview();
+            });
+
+            document.getElementById('cardWidthInput').addEventListener('input', (e) => {
+                state.settings.cardWidth = parseFloat(e.target.value) || 60;
+                renderPreview();
+            });
+            document.getElementById('cardHeightInput').addEventListener('input', (e) => {
+                state.settings.cardHeight = parseFloat(e.target.value) || 90;
+                renderPreview();
+            });
+
+            // Page Size Buttons
+            document.querySelectorAll('.page-size-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.page-size-btn').forEach(b => {
+                        b.classList.remove('border-brand-500', 'bg-brand-500/10', 'text-brand-300');
+                        b.classList.add('border-slate-700', 'bg-slate-800', 'text-slate-300');
+                    });
+                    btn.classList.remove('border-slate-700', 'bg-slate-800', 'text-slate-300');
+                    btn.classList.add('border-brand-500', 'bg-brand-500/10', 'text-brand-300');
+                    state.settings.pageSize = btn.dataset.pagesize;
+                    renderPreview();
+                });
+            });
+
+            // Orientation Buttons
+            document.querySelectorAll('.orientation-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.orientation-btn').forEach(b => {
+                        b.classList.remove('border-brand-500', 'bg-brand-500/10', 'text-brand-300');
+                        b.classList.add('border-slate-700', 'bg-slate-800', 'text-slate-300');
+                    });
+                    btn.classList.remove('border-slate-700', 'bg-slate-800', 'text-slate-300');
+                    btn.classList.add('border-brand-500', 'bg-brand-500/10', 'text-brand-300');
+                    state.settings.orientation = btn.dataset.orientation;
+                    renderPreview();
+                });
+            });
+
+            // Enable Duplex Checkbox & Options
+            document.getElementById('enableDuplex').addEventListener('change', (e) => {
+                state.settings.enableDuplex = e.target.checked;
+                const duplexOptions = document.getElementById('duplexOptions');
+                if (e.target.checked) {
+                    duplexOptions.classList.remove('hidden');
+                } else {
+                    duplexOptions.classList.add('hidden');
+                }
+                renderPreview();
+            });
+
+            document.querySelectorAll('input[name="duplexFlip"]').forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    state.settings.duplexFlip = e.target.value;
+                    renderPreview();
+                });
+            });
+
+            // Margins & Gaps
+            ['pageMarginX', 'pageMarginY', 'gapX', 'gapY'].forEach(id => {
+                document.getElementById(id).addEventListener('input', (e) => {
+                    state.settings[id] = parseFloat(e.target.value) || 0;
+                    renderPreview();
+                });
+            });
+
+            // Guides Checkboxes
+            document.getElementById('showCropMarks').addEventListener('change', (e) => {
+                state.settings.showCropMarks = e.target.checked;
+                renderPreview();
+            });
+            document.getElementById('showCornerRadius').addEventListener('change', (e) => {
+                state.settings.showCornerRadius = e.target.checked;
+                renderPreview();
+            });
+            document.getElementById('showCardBorder').addEventListener('change', (e) => {
+                state.settings.showCardBorder = e.target.checked;
+                renderPreview();
+            });
+
+            // Reset Button
+            document.getElementById('resetDeckBtn').addEventListener('click', () => {
+                state.cards = [];
+                state.globalBackSrc = null;
+                backPreviewImg.classList.add('hidden');
+                backPlaceholder.classList.remove('hidden');
+                removeBackBtn.classList.add('hidden');
+                renderCardsList();
+                renderPreview();
+                showToast("Paquet réinitialisé");
+            });
+
+            // Zoom Controls
+            document.getElementById('zoomInBtn').addEventListener('click', () => adjustZoom(0.1));
+            document.getElementById('zoomOutBtn').addEventListener('click', () => adjustZoom(-0.1));
+            document.getElementById('zoomFitBtn').addEventListener('click', () => { state.zoom = 0.75; updateZoomUI(); });
+
+            // Print & PDF Buttons
+            document.getElementById('printBtn').addEventListener('click', handlePrint);
+            document.getElementById('downloadPdfBtn').addEventListener('click', handlePdfExport);
+        }
+
+        function setupDropZone(elem, callback) {
+            elem.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                elem.classList.add('border-brand-500', 'bg-brand-500/10');
+            });
+            elem.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                elem.classList.remove('border-brand-500', 'bg-brand-500/10');
+            });
+            elem.addEventListener('drop', (e) => {
+                e.preventDefault();
+                elem.classList.remove('border-brand-500', 'bg-brand-500/10');
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                    callback(e.dataTransfer.files);
+                }
+            });
+        }
+
+        function adjustZoom(delta) {
+            state.zoom = Math.min(Math.max(0.25, state.zoom + delta), 2.0);
+            updateZoomUI();
+        }
+
+        function updateZoomUI() {
+            document.getElementById('zoomLabel').innerText = `${Math.round(state.zoom * 100)}%`;
+            pagesRenderArea.style.transform = `scale(${state.zoom})`;
+        }
+
+        function switchTab(tabName) {
+            const deckTab = document.getElementById('tabDeck');
+            const settingsTab = document.getElementById('tabSettings');
+            const deckBtn = document.getElementById('tabDeckBtn');
+            const settingsBtn = document.getElementById('tabSettingsBtn');
+
+            if (tabName === 'deck') {
+                deckTab.classList.remove('hidden');
+                settingsTab.classList.add('hidden');
+                deckBtn.classList.add('text-indigo-400', 'bg-slate-800/80');
+                deckBtn.classList.remove('text-slate-400');
+                settingsBtn.classList.remove('text-indigo-400', 'bg-slate-800/80');
+                settingsBtn.classList.add('text-slate-400');
+            } else {
+                settingsTab.classList.remove('hidden');
+                deckTab.classList.add('hidden');
+                settingsBtn.classList.add('text-indigo-400', 'bg-slate-800/80');
+                settingsBtn.classList.remove('text-slate-400');
+                deckBtn.classList.remove('text-indigo-400', 'bg-slate-800/80');
+                deckBtn.classList.add('text-slate-400');
+            }
+        }
+
+        function handleImageUpload(files) {
+            if (!files || files.length === 0) return;
+
+            let loaded = 0;
+            Array.from(files).forEach(file => {
+                if (!file.type.startsWith('image/')) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    state.cards.push({
+                        id: 'card_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+                        src: e.target.result,
+                        backSrc: null, // Custom back per card
+                        name: file.name.replace(/\.[^/.]+$/, ""),
+                        qty: 1
+                    });
+                    loaded++;
+                    if (loaded === files.length) {
+                        renderCardsList();
+                        renderPreview();
+                        showToast(`${loaded} carte(s) ajoutée(s)`);
+                    }
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function handleGlobalBackUpload(file) {
+            if (!file || !file.type.startsWith('image/')) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                state.globalBackSrc = e.target.result;
+                backPreviewImg.src = e.target.result;
+                backPreviewImg.classList.remove('hidden');
+                backPlaceholder.classList.add('hidden');
+                removeBackBtn.classList.remove('hidden');
+                renderCardsList();
+                renderPreview();
+                showToast("Dos général des cartes mis à jour");
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function triggerCustomBackUpload(index) {
+            state.activeCustomBackIndex = index;
+            customBackInput.value = '';
+            customBackInput.click();
+        }
+
+        function removeCustomBack(index) {
+            state.cards[index].backSrc = null;
+            renderCardsList();
+            renderPreview();
+            showToast(`Dos spécifique retiré pour "${state.cards[index].name}"`);
+        }
+
+        function renderCardsList() {
+            cardsList.innerHTML = '';
+
+            const totalCardsCount = state.cards.reduce((acc, c) => acc + c.qty, 0);
+            document.getElementById('totalCardsCount').innerText = totalCardsCount;
+            document.getElementById('deckSummaryText').innerText = `${state.cards.length} visuel(s) unique(s)`;
+
+            if (state.cards.length === 0) {
+                cardsList.appendChild(emptyDeckState);
+                return;
+            }
+
+            state.cards.forEach((card, index) => {
+                const item = document.createElement('div');
+                item.className = "bg-slate-800/60 border border-slate-700/70 rounded-xl p-3 flex flex-col gap-2.5 hover:border-slate-600 transition";
+                
+                const effectiveBackSrc = card.backSrc || state.globalBackSrc;
+                const hasCustomBack = !!card.backSrc;
+
+                item.innerHTML = `
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center gap-2">
+                            <div class="relative group">
+                                <img src="${card.src}" class="w-10 h-14 object-cover rounded bg-slate-900 border border-slate-700 shrink-0">
+                                <span class="absolute -top-1 -left-1 bg-brand-600 text-[9px] font-bold text-white px-1 rounded shadow">Recto</span>
+                            </div>
+                            <div class="relative group">
+                                ${effectiveBackSrc ? 
+                                    `<img src="${effectiveBackSrc}" class="w-10 h-14 object-cover rounded bg-slate-900 border border-slate-700 shrink-0">` : 
+                                    `<div class="w-10 h-14 rounded bg-slate-900 border border-dashed border-slate-700 flex items-center justify-center text-[9px] text-slate-500 text-center leading-none p-1 shrink-0">Dos DÉFAUT</div>`
+                                }
+                                <span class="absolute -top-1 -right-1 ${hasCustomBack ? 'bg-indigo-500' : 'bg-slate-700'} text-[9px] font-bold text-white px-1 rounded shadow">
+                                    ${hasCustomBack ? 'Perso' : 'Dos'}
+                                </span>
+                            </div>
+                        </div>
+
+                        <div class="flex-1 min-w-0">
+                            <p class="text-xs font-semibold text-slate-200 truncate" title="${card.name}">${card.name}</p>
+                            <p class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
+                                <i data-lucide="copy" class="w-3 h-3"></i> Exactement ${card.qty} recto/verso
+                            </p>
+                        </div>
+
+                        <button onclick="deleteCard(${index})" class="text-slate-500 hover:text-red-400 p-1.5 transition rounded">
+                            <i data-lucide="trash-2" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+
+                    <!-- Quantity and Custom Back Action Toolbar -->
+                    <div class="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
+                        <div class="flex items-center gap-2">
+                            ${hasCustomBack ? 
+                                `<button onclick="removeCustomBack(${index})" class="text-[10px] text-red-400 hover:underline flex items-center gap-1">
+                                    <i data-lucide="x" class="w-3 h-3"></i> Enlever dos dédié
+                                 </button>` :
+                                `<button onclick="triggerCustomBackUpload(${index})" class="text-[10px] text-indigo-400 hover:text-indigo-300 hover:underline flex items-center gap-1">
+                                    <i data-lucide="image-plus" class="w-3 h-3"></i> Dos spécifique
+                                 </button>`
+                            }
+                        </div>
+
+                        <div class="flex items-center space-x-1 bg-slate-900/80 rounded-lg p-1 border border-slate-700/80">
+                            <span class="text-[10px] text-slate-400 px-1 font-medium">Qté:</span>
+                            <button onclick="changeQty(${index}, -1)" class="w-6 h-6 rounded flex items-center justify-center hover:bg-slate-700 text-slate-300 font-bold text-xs">-</button>
+                            <input type="number" min="1" value="${card.qty}" onchange="setQtyDirect(${index}, this.value)" class="w-8 text-center text-xs font-bold bg-transparent text-slate-100 outline-none">
+                            <button onclick="changeQty(${index}, 1)" class="w-6 h-6 rounded flex items-center justify-center hover:bg-slate-700 text-slate-300 font-bold text-xs">+</button>
+                        </div>
+                    </div>
+                `;
+                cardsList.appendChild(item);
+            });
+            lucide.createIcons();
+        }
+
+        function changeQty(index, delta) {
+            state.cards[index].qty = Math.max(1, state.cards[index].qty + delta);
+            renderCardsList();
+            renderPreview();
+        }
+
+        function setQtyDirect(index, val) {
+            const parsed = parseInt(val, 10);
+            state.cards[index].qty = isNaN(parsed) || parsed < 1 ? 1 : parsed;
+            renderCardsList();
+            renderPreview();
+        }
+
+        function deleteCard(index) {
+            state.cards.splice(index, 1);
+            renderCardsList();
+            renderPreview();
+        }
+
+        function updateGridCalculations() {
+            const baseSpec = PAGE_SPECS[state.settings.pageSize];
+            const isLandscape = state.settings.orientation === 'landscape';
+            
+            const pageW = isLandscape ? baseSpec.height : baseSpec.width;
+            const pageH = isLandscape ? baseSpec.width : baseSpec.height;
+
+            const availableW = pageW - (2 * state.settings.marginX);
+            const availableH = pageH - (2 * state.settings.marginY);
+
+            const cols = Math.max(1, Math.floor((availableW + state.settings.gapX) / (state.settings.cardWidth + state.settings.gapX)));
+            const rows = Math.max(1, Math.floor((availableH + state.settings.gapY) / (state.settings.cardHeight + state.settings.gapY)));
+
+            return { cols, rows, perPage: cols * rows, pageSpec: { width: pageW, height: pageH } };
+        }
+
+        // Returns an array of expanded card objects exactly matching individual card quantities
+        function getFlattenedCards() {
+            const flat = [];
+            state.cards.forEach(card => {
+                for (let i = 0; i < card.qty; i++) {
+                    flat.push(card);
+                }
+            });
+            return flat;
+        }
+
+        function renderPreview() {
+            pagesRenderArea.innerHTML = '';
+            printOnlyContainer.innerHTML = '';
+
+            const { cols, rows, perPage, pageSpec } = updateGridCalculations();
+            document.getElementById('gridFormatText').innerText = `${cols}x${rows} (${perPage}/page)`;
+
+            const flatCards = getFlattenedCards();
+            const totalCardsCount = flatCards.length;
+            document.getElementById('totalCardsDetails').innerText = `${totalCardsCount} Recto / ${state.settings.enableDuplex ? totalCardsCount : 0} Verso`;
+
+            if (totalCardsCount === 0) {
+                document.getElementById('totalPagesCount').innerText = "0";
+                pagesRenderArea.innerHTML = `
+                    <div class="text-center py-24 text-slate-600">
+                        <i data-lucide="layers" class="w-16 h-16 mx-auto mb-3 opacity-20"></i>
+                        <p class="text-sm font-semibold text-slate-400">Aucun visuel à afficher</p>
+                        <p class="text-xs text-slate-500 mt-1">Ajoutez des images de cartes depuis le panneau de gauche.</p>
+                    </div>
+                `;
+                lucide.createIcons();
+                return;
+            }
+
+            const totalPages = Math.ceil(totalCardsCount / perPage);
+            document.getElementById('totalPagesCount').innerText = state.settings.enableDuplex ? `${totalPages * 2} (${totalPages} recto / ${totalPages} verso)` : `${totalPages}`;
+
+            document.documentElement.style.setProperty('--page-size-css', `${pageSpec.width}mm ${pageSpec.height}mm`);
+
+            for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+                const pageCards = flatCards.slice(pageIdx * perPage, (pageIdx + 1) * perPage);
+
+                // 1. FRONT PAGE
+                const frontSheet = createSheetElement(pageSpec, cols, rows, pageCards, 'front', pageIdx + 1);
+                pagesRenderArea.appendChild(frontSheet.preview);
+                printOnlyContainer.appendChild(frontSheet.print);
+
+                // 2. BACK PAGE (Duplex Mode with exact matching card count per slot)
+                if (state.settings.enableDuplex) {
+                    const backSheet = createSheetElement(pageSpec, cols, rows, pageCards, 'back', pageIdx + 1);
+                    pagesRenderArea.appendChild(backSheet.preview);
+                    printOnlyContainer.appendChild(backSheet.print);
+                }
+            }
+
+            updateZoomUI();
+            lucide.createIcons();
+        }
+
+        function createSheetElement(pageSpec, cols, rows, pageCards, mode, pageNum) {
+            const isBack = mode === 'back';
+            
+            const pageDiv = document.createElement('div');
+            pageDiv.className = `page-sheet print-page rounded-sm overflow-hidden flex flex-col justify-between`;
+            pageDiv.style.width = `${pageSpec.width}mm`;
+            pageDiv.style.height = `${pageSpec.height}mm`;
+            pageDiv.style.padding = `${state.settings.marginY}mm ${state.settings.marginX}mm`;
+
+            const totalGridW = (cols * state.settings.cardWidth) + ((cols - 1) * state.settings.gapX);
+            const totalGridH = (rows * state.settings.cardHeight) + ((rows - 1) * state.settings.gapY);
+
+            const gridContainer = document.createElement('div');
+            gridContainer.className = "relative w-full h-full flex items-center justify-center";
+
+            const gridWrapper = document.createElement('div');
+            gridWrapper.className = "relative grid";
+            gridWrapper.style.gridTemplateColumns = `repeat(${cols}, ${state.settings.cardWidth}mm)`;
+            gridWrapper.style.gridTemplateRows = `repeat(${rows}, ${state.settings.cardHeight}mm)`;
+            gridWrapper.style.columnGap = `${state.settings.gapX}mm`;
+            gridWrapper.style.rowGap = `${state.settings.gapY}mm`;
+            gridWrapper.style.width = `${totalGridW}mm`;
+            gridWrapper.style.height = `${totalGridH}mm`;
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const cardSlotIndex = r * cols + c;
+                    
+                    let cardDataIndex = cardSlotIndex;
+                    if (isBack) {
+                        // Apply horizontal mirror indexing for back pages so printed backs match fronts when flipped
+                        const mirroredCol = (cols - 1) - c;
+                        cardDataIndex = r * cols + mirroredCol;
+                    }
+
+                    const card = pageCards[cardDataIndex];
+
+                    const cardSlot = document.createElement('div');
+                    cardSlot.className = "relative flex items-center justify-center overflow-hidden";
+                    cardSlot.style.width = `${state.settings.cardWidth}mm`;
+                    cardSlot.style.height = `${state.settings.cardHeight}mm`;
+
+                    if (state.settings.showCornerRadius) {
+                        cardSlot.style.borderRadius = "3.5mm";
+                    }
+
+                    if (state.settings.showCardBorder) {
+                        cardSlot.style.boxShadow = "inset 0 0 0 0.2mm rgba(0,0,0,0.3)";
+                    }
+
+                    if (card) {
+                        const img = document.createElement('img');
+                        img.className = "w-full h-full object-cover";
+                        
+                        if (isBack) {
+                            // Use custom back if available, otherwise global back, otherwise SVG placeholder
+                            img.src = card.backSrc || state.globalBackSrc || createPlaceholderBackSVG();
+                        } else {
+                            img.src = card.src;
+                        }
+
+                        cardSlot.appendChild(img);
+                    }
+
+                    if (state.settings.showCropMarks) {
+                        appendCropMarks(cardSlot);
+                    }
+
+                    gridWrapper.appendChild(cardSlot);
+                }
+            }
+
+            gridContainer.appendChild(gridWrapper);
+            pageDiv.appendChild(gridContainer);
+
+            const printDiv = pageDiv.cloneNode(true);
+
+            const pageBadge = document.createElement('div');
+            pageBadge.className = "no-print absolute -top-6 left-0 text-[11px] font-bold text-slate-400 flex items-center gap-2";
+            pageBadge.innerHTML = `<span>Page ${pageNum} ${isBack ? '(Verso / Dos)' : '(Recto)'}</span>`;
+            
+            const previewContainer = document.createElement('div');
+            previewContainer.className = "relative";
+            previewContainer.appendChild(pageBadge);
+            previewContainer.appendChild(pageDiv);
+
+            return { preview: previewContainer, print: printDiv };
+        }
+
+        function appendCropMarks(parent) {
+            ['tl', 'tr', 'bl', 'br'].forEach(pos => {
+                const mark = document.createElement('div');
+                mark.className = `crop-mark crop-mark-${pos}`;
+                parent.appendChild(mark);
+            });
+        }
+
+        function createPlaceholderBackSVG() {
+            const svg = `
+                <svg xmlns="http://www.w3.org/2000/svg" width="200" height="300" viewBox="0 0 200 300">
+                    <rect width="100%" height="100%" fill="#1e1b4b"/>
+                    <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+                        <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#312e81" stroke-width="1"/>
+                        <circle cx="10" cy="10" r="2" fill="#4338ca" />
+                    </pattern>
+                    <rect width="100%" height="100%" fill="url(#grid)" />
+                    <rect x="10" y="10" width="180" height="280" fill="none" stroke="#6366f1" stroke-width="2" rx="8"/>
+                </svg>
+            `;
+            return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+        }
+
+        function showToast(msg, icon = 'info') {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastMsg').innerText = msg;
+            const toastIcon = document.getElementById('toastIcon');
+            toastIcon.setAttribute('data-lucide', icon);
+            lucide.createIcons();
+
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+
+        function handlePrint() {
+            const flatCards = getFlattenedCards();
+            if (flatCards.length === 0) {
+                showToast("Veuillez ajouter des cartes avant d'imprimer", "alert-circle");
+                return;
+            }
+            
+            renderPreview();
+            
+            setTimeout(() => {
+                window.print();
+            }, 50);
+        }
+
+        async function handlePdfExport() {
+            const flatCards = getFlattenedCards();
+            if (flatCards.length === 0) {
+                showToast("Veuillez ajouter des cartes avant d'exporter", "alert-circle");
+                return;
+            }
+
+            const jsPDFConstructor = (window.jspdf && window.jspdf.jsPDF) || window.jsPDF;
+            const hasHtml2Canvas = typeof window.html2canvas === 'function';
+
+            if (!jsPDFConstructor || !hasHtml2Canvas) {
+                showToast("Bibliothèque PDF indisponible. Lancement de l'impression système...", "alert-circle");
+                setTimeout(() => window.print(), 800);
+                return;
+            }
+
+            showToast("Génération du PDF en cours...", "loader");
+
+            const pdfStagingArea = document.getElementById('pdfStagingArea');
+            pdfStagingArea.innerHTML = '';
+
+            try {
+                const { cols, rows, perPage, pageSpec } = updateGridCalculations();
+                const totalPages = Math.ceil(flatCards.length / perPage);
+
+                const pdf = new jsPDFConstructor({
+                    orientation: state.settings.orientation,
+                    unit: 'mm',
+                    format: state.settings.pageSize.toLowerCase()
+                });
+
+                if (document.fonts && document.fonts.ready) {
+                    await document.fonts.ready;
+                }
+
+                let pageCounter = 0;
+
+                for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+                    const pageCards = flatCards.slice(pageIdx * perPage, (pageIdx + 1) * perPage);
+
+                    // Render Front
+                    const frontSheet = createSheetElement(pageSpec, cols, rows, pageCards, 'front', pageIdx + 1);
+                    pageCounter = await captureAndAddToPdf(pdf, frontSheet.print, pageSpec, pageCounter);
+
+                    // Render Back if Duplex
+                    if (state.settings.enableDuplex) {
+                        const backSheet = createSheetElement(pageSpec, cols, rows, pageCards, 'back', pageIdx + 1);
+                        pageCounter = await captureAndAddToPdf(pdf, backSheet.print, pageSpec, pageCounter);
+                    }
+                }
+
+                pdf.save(`Paquet_Cartes_${new Date().toISOString().slice(0, 10)}.pdf`);
+                showToast("Téléchargement du PDF terminé !", "check-circle");
+            } catch (err) {
+                console.error("PDF Export error:", err);
+                showToast("Erreur lors de la génération. Bascule vers l'impression...", "alert-circle");
+                setTimeout(() => window.print(), 1000);
+            } finally {
+                pdfStagingArea.innerHTML = '';
+            }
+        }
+
+        async function captureAndAddToPdf(pdfInstance, elementNode, pageSpec, pageIndex) {
+            const pdfStagingArea = document.getElementById('pdfStagingArea');
+            pdfStagingArea.innerHTML = '';
+            
+            elementNode.style.position = 'relative';
+            elementNode.style.display = 'block';
+            elementNode.style.visibility = 'visible';
+            elementNode.style.opacity = '1';
+            pdfStagingArea.appendChild(elementNode);
+
+            const imgElements = elementNode.querySelectorAll('img');
+            const imgPromises = Array.from(imgElements).map(img => {
+                if (img.complete) return Promise.resolve();
+                return new Promise(resolve => {
+                    img.onload = resolve;
+                    img.onerror = resolve;
+                });
+            });
+            await Promise.all(imgPromises);
+            await new Promise(r => setTimeout(r, 150));
+
+            const canvas = await window.html2canvas(elementNode, {
+                scale: 2,
+                useCORS: true,
+                allowTaint: true,
+                logging: false,
+                backgroundColor: '#ffffff'
+            });
+
+            const imgData = canvas.toDataURL('image/png');
+
+            if (pageIndex > 0) {
+                pdfInstance.addPage(state.settings.pageSize.toLowerCase(), state.settings.orientation);
+            }
+
+            pdfInstance.addImage(imgData, 'PNG', 0, 0, pageSpec.width, pageSpec.height);
+            return pageIndex + 1;
+        }
+    </script>
+</body>
+</html>
